@@ -60,6 +60,21 @@
     }
 
     .hint { font-size: 11px; color: #8896a8; margin-top: 4px; font-weight: 600; }
+    .input-action-row { display: flex; gap: 8px; align-items: center; }
+    .input-action-row input { flex: 1; }
+    .mini-btn {
+      white-space: nowrap;
+      border: 1px solid #0066cc;
+      background: #fff;
+      color: #0066cc;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 10px 12px;
+      cursor: pointer;
+      min-height: 42px;
+    }
+    .mini-btn:hover { background: #eef4fc; }
 
     /* Check-in panels — mirrors formSections.tsx CheckInOutSection */
     .checkin-panel {
@@ -280,7 +295,10 @@
           </div>
           <div class="form-group">
             <label>우편번호 <span class="req">*</span></label>
-            <input type="text" name="zipCode" placeholder="예: 06234" required>
+            <div class="input-action-row">
+              <input type="text" name="zipCode" id="zipCodeInput" placeholder="예: 06234" required>
+              <button type="button" class="mini-btn" id="searchAddressBtn">주소 검색</button>
+            </div>
           </div>
         </div>
         <div class="form-row single">
@@ -510,6 +528,11 @@
 
   var sidoSelect = document.getElementById("sidoSelect");
   var sigunguSelect = document.getElementById("sigunguSelect");
+  var zipCodeInput = document.getElementById("zipCodeInput");
+  var addressDetailInput = document.querySelector('[name="addressDetail"]');
+  var searchAddressBtn = document.getElementById("searchAddressBtn");
+  var postcodeScriptLoading = false;
+  var postcodeScriptLoaded = false;
   var weekdayChips = document.getElementById("weekdayChips");
   var weekendChips = document.getElementById("weekendChips");
   var weekdayDaysInput = document.getElementById("weekdayDaysInput");
@@ -524,17 +547,20 @@
     sidoSelect.appendChild(opt);
   });
 
-  sidoSelect.addEventListener("change", function() {
+  function fillSigunguOptions(sido) {
     sigunguSelect.innerHTML = '<option value="">시/군/구 선택</option>';
-    var selected = this.value;
-    if (selected && regionData[selected]) {
-      regionData[selected].forEach(function(sigungu) {
+    if (sido && regionData[sido]) {
+      regionData[sido].forEach(function(sigungu) {
         var opt = document.createElement("option");
         opt.value = sigungu;
         opt.textContent = sigungu;
         sigunguSelect.appendChild(opt);
       });
     }
+  }
+
+  sidoSelect.addEventListener("change", function() {
+    fillSigunguOptions(this.value);
   });
 
   function syncDayHidden() {
@@ -641,8 +667,86 @@
   refSelect.addEventListener("change", updateReferenceFields);
 
   function buildPropertyKrAddress() {
-    var parts = [sidoSelect.value, sigunguSelect.value, document.querySelector('[name="addressDetail"]').value].filter(Boolean);
+    var parts = [sidoSelect.value, sigunguSelect.value, addressDetailInput.value].filter(Boolean);
     return parts.join(" ");
+  }
+
+  function stripLeadingRegion(address, sido, sigungu) {
+    var result = address || "";
+    if (sido && result.indexOf(sido + " ") === 0) {
+      result = result.substring((sido + " ").length);
+    }
+    if (sigungu && result.indexOf(sigungu + " ") === 0) {
+      result = result.substring((sigungu + " ").length);
+    }
+    return result;
+  }
+
+  function setRegionFieldsFromLookup(sido, sigungu) {
+    if (sido) {
+      sidoSelect.value = sido;
+      fillSigunguOptions(sido);
+    }
+    if (sigungu) {
+      sigunguSelect.value = sigungu;
+    }
+  }
+
+  function openAddressSearch() {
+    new window.daum.Postcode({
+      oncomplete: function(data) {
+        var roadOrJibun = data.roadAddress || data.jibunAddress || data.address || "";
+        var cleanedDetail = stripLeadingRegion(roadOrJibun, data.sido, data.sigungu);
+        var extraAddress = data.buildingName && data.apartment === "Y" ? data.buildingName : "";
+
+        if (zipCodeInput) zipCodeInput.value = data.zonecode || "";
+        setRegionFieldsFromLookup(data.sido || "", data.sigungu || "");
+        if (addressDetailInput) {
+          addressDetailInput.value = (cleanedDetail + (extraAddress ? " " + extraAddress : "")).trim();
+          addressDetailInput.focus();
+        }
+      }
+    }).open();
+  }
+
+  function loadPostcodeScript(onReady) {
+    if (window.daum && window.daum.Postcode) {
+      postcodeScriptLoaded = true;
+      onReady();
+      return;
+    }
+
+    if (postcodeScriptLoading) {
+      setTimeout(function() { loadPostcodeScript(onReady); }, 150);
+      return;
+    }
+
+    postcodeScriptLoading = true;
+    var script = document.createElement("script");
+    script.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    script.async = true;
+    script.onload = function() {
+      postcodeScriptLoading = false;
+      postcodeScriptLoaded = true;
+      onReady();
+    };
+    script.onerror = function() {
+      postcodeScriptLoading = false;
+      postcodeScriptLoaded = false;
+      showToast("주소 검색을 불러오지 못했습니다. 네트워크/VPN 확인 후 다시 시도해주세요.", "error");
+      window.open("https://www.juso.go.kr/support/AddressMainSearch.do", "_blank");
+    };
+    document.head.appendChild(script);
+  }
+
+  if (searchAddressBtn) {
+    searchAddressBtn.addEventListener("click", function() {
+      if (postcodeScriptLoaded || (window.daum && window.daum.Postcode)) {
+        openAddressSearch();
+        return;
+      }
+      loadPostcodeScript(openAddressSearch);
+    });
   }
 
   function buildReferenceSummary() {
