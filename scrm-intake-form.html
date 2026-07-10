@@ -60,6 +60,17 @@
     }
 
     .hint { font-size: 11px; color: #8896a8; margin-top: 4px; font-weight: 600; }
+
+    .checkbox-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 10px;
+      padding: 10px 12px; background: #f6f8fb; border: 1px solid #d8e0eb; border-radius: 8px;
+    }
+    .checkbox-row input[type="checkbox"] {
+      width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #143883;
+    }
+    .checkbox-row .checkbox-label {
+      font-size: 13px; font-weight: 700; color: #142033; cursor: pointer; user-select: none;
+    }
     .input-action-row { display: flex; gap: 8px; align-items: center; }
     .input-action-row input { flex: 1; }
     .mini-btn {
@@ -278,7 +289,7 @@
 
       <div class="section">
         <div class="section-title">Property Information</div>
-        <p class="address-note">주소는 한국어로 입력합니다. 영문 주소(Property EN address)는 제출 후 Apps Script에서 자동 변환·기록됩니다.</p>
+        <p class="address-note">숙소명·주소는 한국어로 입력합니다. 영문 숙소명·영문 주소(Property EN name / EN address)는 제출 후 Apps Script에서 자동 변환·기록됩니다.</p>
 
         <div class="form-row three-col">
           <div class="form-group">
@@ -421,6 +432,23 @@
 
         <div class="form-row">
           <div class="form-group">
+            <label>Min stay <span class="req">*</span></label>
+            <div class="input-suffix-wrap">
+              <input type="number" name="minStay" id="minStayInput" placeholder="1" min="1" value="1" required>
+              <span class="suffix">nights</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Max stay <span class="req">*</span></label>
+            <div class="input-suffix-wrap">
+              <input type="number" name="maxStay" id="maxStayInput" placeholder="30" min="1" value="30" required>
+              <span class="suffix">nights</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
             <label>Consecutive Stay <span class="req">*</span></label>
             <select name="consecutiveStay" required>
               <option value="">Select</option>
@@ -458,6 +486,11 @@
           <div class="form-group">
             <label>Training Remark(KR) <span class="req">*</span></label>
             <textarea name="trainingRemarkKr" placeholder="교육/인계 메모를 한국어로 작성하세요." required></textarea>
+            <div class="checkbox-row">
+              <input type="checkbox" id="settlementDataReceivedCheck">
+              <label class="checkbox-label" for="settlementDataReceivedCheck">정산자료 수취여부</label>
+            </div>
+            <input type="hidden" name="settlementDataReceived" id="settlementDataReceivedInput" value="N">
           </div>
         </div>
         <div class="form-row">
@@ -651,10 +684,26 @@
   }
   costSelect.addEventListener("change", updateCostAmountField);
 
+  var settlementDataCheck = document.getElementById("settlementDataReceivedCheck");
+  var settlementDataInput = document.getElementById("settlementDataReceivedInput");
+
+  function updateSettlementDataReceived() {
+    settlementDataInput.value = settlementDataCheck.checked ? "Y" : "N";
+  }
+  settlementDataCheck.addEventListener("change", updateSettlementDataReceived);
+
   var refSelect = document.getElementById("referenceSiteSelect");
   var refCustomRow = document.getElementById("referenceCustomRow");
   var refUrlRow = document.getElementById("referenceUrlRow");
   var refCustomInput = document.getElementById("referenceSiteCustom");
+  var otherOtaUrlInput = document.querySelector('[name="otherOtaUrl"]');
+  var propertyNameInput = document.querySelector('[name="propertyName"]');
+
+  function buildNolSearchUrl() {
+    var name = propertyNameInput && propertyNameInput.value ? propertyNameInput.value.trim() : "";
+    if (!name) return "";
+    return "https://nol.yanolja.com/search?keyword=" + encodeURIComponent(name);
+  }
 
   function updateReferenceFields() {
     var site = refSelect.value;
@@ -663,8 +712,38 @@
     refUrlRow.classList.toggle("show", site !== "");
     refCustomInput.required = isEtc;
     if (!isEtc) refCustomInput.value = "";
+
+    if (!otherOtaUrlInput) return;
+
+    // NOL 선택 시 숙소명 기반 검색 URL을 기본값으로 자동 입력
+    if (site === "NOL") {
+      var autoUrl = buildNolSearchUrl();
+      if (autoUrl && !otherOtaUrlInput.value.trim()) {
+        otherOtaUrlInput.value = autoUrl;
+        otherOtaUrlInput.setAttribute("data-auto-filled", "true");
+      }
+      otherOtaUrlInput.placeholder = "https://nol.yanolja.com/...";
+      return;
+    }
+
+    if (otherOtaUrlInput.getAttribute("data-auto-filled") === "true") {
+      otherOtaUrlInput.value = "";
+      otherOtaUrlInput.removeAttribute("data-auto-filled");
+    }
+    otherOtaUrlInput.placeholder = "https://...";
   }
   refSelect.addEventListener("change", updateReferenceFields);
+  if (propertyNameInput) {
+    propertyNameInput.addEventListener("blur", function() {
+      if (refSelect.value === "NOL" && (!otherOtaUrlInput.value.trim() || otherOtaUrlInput.getAttribute("data-auto-filled") === "true")) {
+        var autoUrl = buildNolSearchUrl();
+        if (autoUrl) {
+          otherOtaUrlInput.value = autoUrl;
+          otherOtaUrlInput.setAttribute("data-auto-filled", "true");
+        }
+      }
+    });
+  }
 
   function buildPropertyKrAddress() {
     var parts = [sidoSelect.value, sigunguSelect.value, addressDetailInput.value].filter(Boolean);
@@ -795,6 +874,13 @@
       return;
     }
 
+    var minStay = parseInt(document.getElementById("minStayInput").value, 10);
+    var maxStay = parseInt(document.getElementById("maxStayInput").value, 10);
+    if (!isNaN(minStay) && !isNaN(maxStay) && minStay > maxStay) {
+      showToast("Min stay는 Max stay보다 클 수 없습니다.", "error");
+      return;
+    }
+
     document.getElementById("propertyKrAddressInput").value = buildPropertyKrAddress();
     document.getElementById("referenceInput").value = buildReferenceSummary();
 
@@ -810,6 +896,7 @@
     btn.textContent = "Submitting...";
     overlay.classList.add("show");
 
+    updateSettlementDataReceived();
     syncDayHidden();
     var fd = new FormData(this);
     var payload = { applicationType: "mat-acq" };
@@ -838,6 +925,8 @@
       setCheckinMode("same");
       updateCostAmountField();
       updateReferenceFields();
+      settlementDataCheck.checked = false;
+      updateSettlementDataReceived();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
